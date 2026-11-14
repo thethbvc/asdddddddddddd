@@ -1,0 +1,95 @@
+package com.example.serverstore;
+
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ItemLore;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+public final class Util {
+    private static final Map<String, Item> ITEMS = new HashMap<>();
+
+    public static Item item(String id) {
+        if (ITEMS.isEmpty()) {
+            for (Item i : BuiltInRegistries.ITEM) ITEMS.put(BuiltInRegistries.ITEM.getKey(i).toString(), i);
+        }
+        return ITEMS.getOrDefault(id, Items.AIR);
+    }
+
+    public static String id(Item i) { return BuiltInRegistries.ITEM.getKey(i).toString(); }
+
+    public static Component text(String s, ChatFormatting color) {
+        return Component.literal(s).withStyle(color).withStyle(st -> st.withItalic(false));
+    }
+
+    public static ItemStack icon(Item item, int count, String name, ChatFormatting color, List<String> lore) {
+        ItemStack s = new ItemStack(item, count);
+        s.set(DataComponents.CUSTOM_NAME, text(name, color));
+        if (lore != null) s.set(DataComponents.LORE, loreOf(lore));
+        return s;
+    }
+
+    public static ItemLore loreOf(List<String> lines) {
+        List<Component> c = new ArrayList<>();
+        for (String l : lines) c.add(text(l, ChatFormatting.GRAY));
+        return new ItemLore(c);
+    }
+
+    public static int count(Player p, Item item) {
+        int c = 0;
+        Inventory inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.is(item)) c += s.getCount();
+        }
+        return c;
+    }
+
+    public static boolean take(Player p, Item item, int amount) {
+        if (count(p, item) < amount) return false;
+        Inventory inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize() && amount > 0; i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.is(item)) {
+                int t = Math.min(amount, s.getCount());
+                s.shrink(t);
+                amount -= t;
+                if (s.isEmpty()) inv.setItem(i, ItemStack.EMPTY);
+            }
+        }
+        return true;
+    }
+
+    public static void give(ServerPlayer p, Item item, int count) {
+        if (item == Items.AIR) return;
+        int max = Math.max(1, new ItemStack(item).getMaxStackSize());
+        while (count > 0) {
+            int n = Math.min(max, count);
+            ItemStack s = new ItemStack(item, n);
+            if (!p.getInventory().add(s)) p.drop(s, false);
+            count -= n;
+        }
+    }
+
+    public static void msg(ServerPlayer p, String s, ChatFormatting color) {
+        p.sendSystemMessage(Component.literal(s).withStyle(color));
+    }
+
+    public static String timeLeft(long endMillis) {
+        long s = Math.max(0, (endMillis - System.currentTimeMillis()) / 1000);
+        if (s >= 3600) return (s / 3600) + "h " + ((s % 3600) / 60) + "m";
+        if (s >= 60) return (s / 60) + "m " + (s % 60) + "s";
+        return s + "s";
+    }
+}
