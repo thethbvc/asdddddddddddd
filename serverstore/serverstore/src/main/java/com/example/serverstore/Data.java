@@ -13,24 +13,17 @@ import java.util.Map;
 
 /** Everything saved to disk: config/serverstore/layout.json and store.json */
 public final class Data {
-    public static class Entry {
-        public int slot;
-        public String item = "minecraft:stone";
-        public int count = 1;
-        public String ore = "IRON";
-        public int price = 1;
-        public Entry() {}
-        public Entry(int slot, String item, int count, String ore, int price) {
-            this.slot = slot; this.item = item; this.count = count; this.ore = ore; this.price = price;
-        }
-    }
 
+    /** How the GUI looks. The owner can change all of this from the in-game Customize menu. */
     public static class Layout {
         public String mainTitle = "Server Menu";
         public String shopTitle = "Shop";
         public String bidsTitle = "Auctions";
         public String filler = "minecraft:gray_stained_glass_pane";
-        public List<Entry> entries = new ArrayList<>();
+        public String border = "";                       // empty = same as filler
+        public boolean clickSounds = true;
+        public Map<String, String> icons = new HashMap<>();   // button key -> item id
+        public Map<String, String> names = new HashMap<>();   // button key -> custom name
     }
 
     public static class Auction {
@@ -45,14 +38,16 @@ public final class Data {
         public long end;
     }
 
-    /** A fixed-price item that a player put up in the player market. */
+    /** A fixed-price item that a player put up in the shop. Price = ores and/or an optional block price. */
     public static class Listing {
         public int id;
         public String seller, sellerName;
         public String item;
         public int count;
         public String ore;
-        public int price;
+        public int price;            // ore amount (can be 0 if a block price is set)
+        public String extraItem;     // optional block price, e.g. minecraft:cobblestone
+        public int extraCount;
     }
 
     public static class Pending {
@@ -84,40 +79,17 @@ public final class Data {
             Path l = dir().resolve("layout.json");
             if (Files.exists(l)) layout = GSON.fromJson(Files.readString(l), Layout.class);
             if (layout == null) layout = new Layout();
-            if (layout.entries.isEmpty() && !Files.exists(l)) defaults();
-            normalize();
+            if (layout.icons == null) layout.icons = new HashMap<>();
+            if (layout.names == null) layout.names = new HashMap<>();
+            if (layout.border == null) layout.border = "";
             Path s = dir().resolve("store.json");
             if (Files.exists(s)) store = GSON.fromJson(Files.readString(s), Store.class);
             if (store == null) store = new Store();
+            if (store.listings == null) store.listings = new ArrayList<>();
         } catch (Exception e) {
             e.printStackTrace();
         }
         saveLayout();
-    }
-
-    /** Shop items live in slots 0-44; the bottom row is for buttons. */
-    private static void normalize() {
-        boolean[] used = new boolean[45];
-        List<Entry> bad = new ArrayList<>();
-        for (Entry e : layout.entries) {
-            if (e.slot >= 0 && e.slot < 45 && !used[e.slot]) used[e.slot] = true;
-            else bad.add(e);
-        }
-        for (Entry e : bad) {
-            int f = 0;
-            while (f < 45 && used[f]) f++;
-            if (f < 45) { e.slot = f; used[f] = true; }
-            else layout.entries.remove(e);
-        }
-    }
-
-    private static void defaults() {
-        layout.entries.add(new Entry(10, "minecraft:bread", 16, "IRON", 4));
-        layout.entries.add(new Entry(11, "minecraft:golden_apple", 1, "GOLD", 3));
-        layout.entries.add(new Entry(12, "minecraft:iron_pickaxe", 1, "IRON", 12));
-        layout.entries.add(new Entry(13, "minecraft:diamond_sword", 1, "DIAMOND", 2));
-        layout.entries.add(new Entry(14, "minecraft:ender_pearl", 4, "EMERALD", 1));
-        layout.entries.add(new Entry(15, "minecraft:elytra", 1, "NETHERITE", 2));
     }
 
     public static void saveLayout() {
