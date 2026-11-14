@@ -50,7 +50,7 @@ public class ServerStore {
     }
 
     // If this line fails to compile, replace the lambda body with:  src.hasPermission(2)
-    private static boolean isOp(CommandSourceStack src) {
+    public static boolean isOp(CommandSourceStack src) {
         return src.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
     }
 
@@ -81,7 +81,7 @@ public class ServerStore {
         d.register(Commands.literal("owner")
                 .requires(ServerStore::isOp)
                 .then(Commands.literal("shopedit").executes(c -> {
-                    Gui.editor(c.getSource().getPlayerOrException());
+                    Gui.ownerEdit(c.getSource().getPlayerOrException());
                     return 1;
                 }))
                 .then(Commands.literal("price")
