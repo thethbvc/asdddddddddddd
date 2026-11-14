@@ -118,8 +118,8 @@ public final class Gui {
                     List.of("See every open auction.", "Left click an item to bid.")), (pl, t) -> bids(pl, false));
             m.set(14, Util.icon(Items.WRITABLE_BOOK, 1, "My Auctions", ChatFormatting.AQUA,
                     List.of("Your listings.", "Create new auctions here.")), (pl, t) -> bids(pl, true));
-            m.set(16, Util.icon(Items.EMERALD, 1, "Ore Exchange", ChatFormatting.DARK_GREEN,
-                    List.of("Trade ores up or down.")), (pl, t) -> exchange(pl));
+            m.set(16, Util.icon(Items.BARREL, 1, "Player Market", ChatFormatting.LIGHT_PURPLE,
+                    List.of("Buy items other players listed.", "List your own items here.")), (pl, t) -> market(pl));
             if (isOwner(p)) {
                 m.set(22, Util.icon(Items.COMMAND_BLOCK, 1, "Edit Shop (Owner)", ChatFormatting.RED,
                         List.of("Only OPs can see this.")), (pl, t) -> ownerEdit(pl));
@@ -144,6 +144,8 @@ public final class Gui {
                     if (m.lastButton == 1) sell(pl, e); else buy(pl, e);
                 });
             }
+            m.set(47, Util.icon(Items.BARREL, 1, "Player Market", ChatFormatting.LIGHT_PURPLE,
+                    List.of("Items listed by other players.")), (pl, t) -> market(pl));
             m.set(49, Util.icon(Items.PAPER, 1, "Your ores", ChatFormatting.WHITE, balance(p)), null);
             m.set(53, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
         });
@@ -171,35 +173,6 @@ public final class Gui {
         }
         Util.give(p, ore.item, refund);
         Util.msg(p, "Sold " + cnt + "x " + nice(e.item) + " for " + refund + " " + ore.label, ChatFormatting.GREEN);
-    }
-
-    // ================================================================ ore exchange
-    private static final int[] RATE = {4, 4, 2, 4};   // iron->gold, gold->diamond, diamond->emerald, emerald->netherite
-
-    public static void exchange(ServerPlayer p) {
-        open(p, "Ore Exchange", 3, m -> {
-            Ore[] ores = Ore.values();
-            m.set(4, Util.icon(Items.PAPER, 1, "Your ores", ChatFormatting.WHITE, balance(p)), null);
-            for (int i = 0; i < RATE.length; i++) {
-                final int idx = i;
-                Ore lo = ores[i], hi = ores[i + 1];
-                m.set(10 + i * 2, Util.icon(hi.item, 1, RATE[i] + " " + lo.label + " = 1 " + hi.label, ChatFormatting.GREEN,
-                        List.of("Left-click: trade up", "Right-click: trade 1 " + hi.label + " down to " + RATE[i] + " " + lo.label)),
-                        (pl, t) -> {
-                            if (m.lastButton == 1) {
-                                if (!Util.take(pl, hi.item, 1)) { Util.msg(pl, "You need 1 " + hi.label + ".", ChatFormatting.RED); return; }
-                                Util.give(pl, lo.item, RATE[idx]);
-                                Util.msg(pl, "Traded 1 " + hi.label + " for " + RATE[idx] + " " + lo.label, ChatFormatting.GREEN);
-                            } else {
-                                if (!Util.take(pl, lo.item, RATE[idx])) { Util.msg(pl, "You need " + RATE[idx] + " " + lo.label + ".", ChatFormatting.RED); return; }
-                                Util.give(pl, hi.item, 1);
-                                Util.msg(pl, "Traded " + RATE[idx] + " " + lo.label + " for 1 " + hi.label, ChatFormatting.GREEN);
-                            }
-                            m.set(4, Util.icon(Items.PAPER, 1, "Your ores", ChatFormatting.WHITE, balance(pl)), null);
-                        });
-            }
-            m.set(22, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
-        });
     }
 
     // ================================================================ bids / my auctions
@@ -295,6 +268,82 @@ public final class Gui {
             if (Auctions.create(pl, d.ore.name(), d.start, d.minutes)) bids(pl, true);
         });
         m.set(22, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> bids(pl, true));
+    }
+
+    // ================================================================ player market (fixed price, players list items)
+    public static void market(ServerPlayer p) {
+        open(p, "Player Market", 6, m -> {
+            String me = p.getUUID().toString();
+            boolean owner = isOwner(p);
+            int slot = 0;
+            for (Data.Listing l : new ArrayList<>(Data.store.listings)) {
+                if (slot >= 45) break;
+                Item it = Util.item(l.item);
+                if (it == Items.AIR) continue;
+                Ore ore = Ore.parse(l.ore);
+                ItemStack s = new ItemStack(it, Math.max(1, l.count));
+                List<String> lore = new ArrayList<>();
+                lore.add("Seller: " + l.sellerName);
+                lore.add("Price: " + l.price + " " + ore.label);
+                if (me.equals(l.seller)) lore.add("Your listing - right-click to take it back");
+                else {
+                    lore.add("Left-click: buy");
+                    if (owner) lore.add("OWNER: right-click to remove");
+                }
+                s.set(DataComponents.LORE, Util.loreOf(lore));
+                m.set(slot++, s, (pl, t) -> {
+                    if (m.lastButton == 1) {
+                        if (pl.getUUID().toString().equals(l.seller)) Market.cancel(pl, l);
+                        else if (isOwner(pl)) Market.adminRemove(pl, l);
+                    } else {
+                        Market.buy(pl, l);
+                    }
+                    market(pl);
+                });
+            }
+            m.set(45, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
+            m.set(49, Util.icon(Items.EMERALD_BLOCK, 1, "List an Item", ChatFormatting.GREEN,
+                    List.of("Sell the item in your hand", "for a fixed price.")), (pl, t) -> listItem(pl));
+            m.set(53, Util.icon(Items.CLOCK, 1, "Refresh", ChatFormatting.YELLOW, null), (pl, t) -> market(pl));
+        });
+    }
+
+    private static class ListDraft {
+        Ore ore = Ore.IRON;
+        int price = 1;
+    }
+
+    public static void listItem(ServerPlayer p) {
+        ListDraft d = new ListDraft();
+        open(p, "List an Item", 3, m -> drawList(m, p, d));
+    }
+
+    private static void drawList(GuiMenu m, ServerPlayer p, ListDraft d) {
+        ItemStack hand = p.getMainHandItem();
+        if (hand.isEmpty()) {
+            m.set(4, Util.icon(Items.BARRIER, 1, "Nothing in your hand!", ChatFormatting.RED,
+                    List.of("Close this, hold the item you want", "to sell, then click List an Item again.")), null);
+        } else {
+            ItemStack s = hand.copy();
+            s.set(DataComponents.LORE, Util.loreOf(List.of("This is what gets listed.", "The whole stack is sold together.")));
+            m.set(4, s, null);
+        }
+        m.set(11, Util.icon(d.ore.item, 1, "Currency: " + d.ore.label, ChatFormatting.GOLD,
+                List.of("Left-click: next ore", "Right-click: previous ore")), (pl, t) -> {
+            int n = Ore.values().length;
+            d.ore = Ore.values()[(d.ore.ordinal() + (m.lastButton == 1 ? n - 1 : 1)) % n];
+            drawList(m, pl, d);
+        });
+        m.set(13, Util.icon(Items.GOLD_NUGGET, 1, "Price: " + d.price + " " + d.ore.label, ChatFormatting.YELLOW,
+                List.of("Left: +1   Right: -1", "Shift-left: +10   Shift-right: -10")), (pl, t) -> {
+            d.price = Math.max(1, Math.min(100000, d.price + delta(m, t, 1, 10)));
+            drawList(m, pl, d);
+        });
+        m.set(15, Util.icon(Items.EMERALD_BLOCK, 1, "CONFIRM", ChatFormatting.GREEN,
+                List.of("Put it on the market!")), (pl, t) -> {
+            if (Market.create(pl, d.ore.name(), d.price)) market(pl);
+        });
+        m.set(22, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> market(pl));
     }
 
     // ================================================================ owner: edit shop from the GUI
