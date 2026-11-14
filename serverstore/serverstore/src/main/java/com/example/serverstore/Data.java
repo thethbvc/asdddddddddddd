@@ -45,6 +45,16 @@ public final class Data {
         public long end;
     }
 
+    /** A fixed-price item that a player put up in the player market. */
+    public static class Listing {
+        public int id;
+        public String seller, sellerName;
+        public String item;
+        public int count;
+        public String ore;
+        public int price;
+    }
+
     public static class Pending {
         public String item;
         public int count;
@@ -55,6 +65,7 @@ public final class Data {
     public static class Store {
         public int nextId = 1;
         public List<Auction> auctions = new ArrayList<>();
+        public List<Listing> listings = new ArrayList<>();
         public Map<String, List<Pending>> pending = new HashMap<>();
     }
 
