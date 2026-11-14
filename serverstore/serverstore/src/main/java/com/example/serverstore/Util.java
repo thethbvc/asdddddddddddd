@@ -86,7 +86,7 @@ public final class Util {
     }
 
     public static void sound(ServerPlayer p, SoundEvent s, float vol, float pitch) {
-        p.playNotifySound(s, SoundSource.PLAYERS, vol, pitch);
+        p.level().playSound(null, p.getX(), p.getY(), p.getZ(), s, SoundSource.PLAYERS, vol, pitch);
     }
 
     /** Little "ding" for every button click. */
