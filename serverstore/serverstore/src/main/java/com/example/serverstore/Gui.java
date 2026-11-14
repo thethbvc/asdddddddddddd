@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 public final class Gui {
@@ -39,8 +40,12 @@ public final class Gui {
             this.box = box;
         }
 
-        static ItemStack fillerStack() {
-            Item f = Util.item(Data.layout.filler);
+        /** Background pane for a slot: the outer ring can use a different "border" item. */
+        ItemStack bg(int slot) {
+            int row = slot / 9, col = slot % 9;
+            boolean edge = row == 0 || row == rows - 1 || col == 0 || col == 8;
+            String id = (edge && !Data.layout.border.isEmpty()) ? Data.layout.border : Data.layout.filler;
+            Item f = Util.item(id);
             if (f == Items.AIR) f = Items.GRAY_STAINED_GLASS_PANE;
             ItemStack s = new ItemStack(f);
             s.set(DataComponents.CUSTOM_NAME, Component.literal(" "));
@@ -54,13 +59,13 @@ public final class Gui {
         }
 
         void clear(int slot) {
-            box.setItem(slot, fillerStack());
+            box.setItem(slot, bg(slot));
             actions.remove(slot);
         }
 
         void fillRest() {
             for (int i = 0; i < rows * 9; i++) {
-                if (box.getItem(i).isEmpty()) box.setItem(i, fillerStack());
+                if (box.getItem(i).isEmpty()) box.setItem(i, bg(i));
             }
         }
 
@@ -71,7 +76,7 @@ public final class Gui {
                 Action a = actions.get(slot);
                 if (a != null) {
                     lastButton = button;
-                    Util.click(sp);          // ding!
+                    if (Data.layout.clickSounds) Util.click(sp);          // ding!
                     a.run(sp, type);
                 }
             }
@@ -91,6 +96,7 @@ public final class Gui {
         }, Component.literal(title)));
     }
 
+    // ---------------------------------------------------------------- helpers
     private static boolean isOwner(ServerPlayer p) {
         return ServerStore.isOp(p.createCommandSourceStack());
     }
@@ -108,71 +114,36 @@ public final class Gui {
         return l;
     }
 
+    private static Item iconFor(String key, Item def) {
+        String id = Data.layout.icons.get(key);
+        if (id == null) return def;
+        Item it = Util.item(id);
+        return it == Items.AIR ? def : it;
+    }
+
+    private static String nameFor(String key, String def) {
+        String n = Data.layout.names.get(key);
+        return (n == null || n.isEmpty()) ? def : n;
+    }
+
+    /** '&6' style color codes typed by the owner become real colors. */
+    private static String colorize(String s) { return s.replace('&', '\u00a7'); }
+
     // ================================================================ main menu
     public static void main(ServerPlayer p) {
         open(p, Data.layout.mainTitle, 3, m -> {
             m.set(4, Util.icon(Items.PAPER, 1, "Your ores", ChatFormatting.WHITE, balance(p)), null);
-            m.set(10, Util.icon(Items.CHEST, 1, "Shop", ChatFormatting.GREEN,
-                    List.of("Buy items with ores.", "Right-click an item to sell it back.")), (pl, t) -> shop(pl));
-            m.set(12, Util.icon(Items.GOLD_INGOT, 1, "Bids", ChatFormatting.GOLD,
+            m.set(11, Util.icon(iconFor("shop", Items.CHEST), 1, nameFor("shop", "Shop"), ChatFormatting.GREEN,
+                    List.of("Buy items other players listed.", "List your own items too.")), (pl, t) -> market(pl));
+            m.set(13, Util.icon(iconFor("bids", Items.GOLD_INGOT), 1, nameFor("bids", "Bids"), ChatFormatting.GOLD,
                     List.of("See every open auction.", "Left click an item to bid.")), (pl, t) -> bids(pl, false));
-            m.set(14, Util.icon(Items.WRITABLE_BOOK, 1, "My Auctions", ChatFormatting.AQUA,
+            m.set(15, Util.icon(iconFor("mine", Items.WRITABLE_BOOK), 1, nameFor("mine", "My Auctions"), ChatFormatting.AQUA,
                     List.of("Your listings.", "Create new auctions here.")), (pl, t) -> bids(pl, true));
-            m.set(16, Util.icon(Items.BARREL, 1, "Player Market", ChatFormatting.LIGHT_PURPLE,
-                    List.of("Buy items other players listed.", "List your own items here.")), (pl, t) -> market(pl));
             if (isOwner(p)) {
-                m.set(22, Util.icon(Items.COMMAND_BLOCK, 1, "Edit Shop (Owner)", ChatFormatting.RED,
-                        List.of("Only OPs can see this.")), (pl, t) -> ownerEdit(pl));
+                m.set(22, Util.icon(Items.COMMAND_BLOCK, 1, "Owner Menu", ChatFormatting.RED,
+                        List.of("Only OPs can see this.")), (pl, t) -> ownerMenu(pl));
             }
         });
-    }
-
-    // ================================================================ shop
-    public static void shop(ServerPlayer p) {
-        open(p, Data.layout.shopTitle, 6, m -> {
-            for (Data.Entry e : Data.layout.entries) {
-                if (e.slot < 0 || e.slot >= 45) continue;
-                Item it = Util.item(e.item);
-                if (it == Items.AIR) continue;
-                Ore ore = Ore.parse(e.ore);
-                ItemStack s = new ItemStack(it, Math.max(1, e.count));
-                s.set(DataComponents.LORE, Util.loreOf(List.of(
-                        "Price: " + e.price + " " + ore.label,
-                        "Left-click: buy",
-                        "Right-click: sell back for " + Math.max(1, e.price / 2) + " " + ore.label)));
-                m.set(e.slot, s, (pl, t) -> {
-                    if (m.lastButton == 1) sell(pl, e); else buy(pl, e);
-                });
-            }
-            m.set(47, Util.icon(Items.BARREL, 1, "Player Market", ChatFormatting.LIGHT_PURPLE,
-                    List.of("Items listed by other players.")), (pl, t) -> market(pl));
-            m.set(49, Util.icon(Items.PAPER, 1, "Your ores", ChatFormatting.WHITE, balance(p)), null);
-            m.set(53, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
-        });
-    }
-
-    private static void buy(ServerPlayer p, Data.Entry e) {
-        Ore ore = Ore.parse(e.ore);
-        Item it = Util.item(e.item);
-        if (!Util.take(p, ore.item, e.price)) {
-            Util.msg(p, "You need " + e.price + " " + ore.label + ".", ChatFormatting.RED);
-            return;
-        }
-        Util.give(p, it, Math.max(1, e.count));
-        Util.msg(p, "Purchased " + e.count + "x " + nice(e.item) + " for " + e.price + " " + ore.label, ChatFormatting.GREEN);
-    }
-
-    private static void sell(ServerPlayer p, Data.Entry e) {
-        Ore ore = Ore.parse(e.ore);
-        Item it = Util.item(e.item);
-        int cnt = Math.max(1, e.count);
-        int refund = Math.max(1, e.price / 2);
-        if (!Util.take(p, it, cnt)) {
-            Util.msg(p, "You need " + cnt + "x " + nice(e.item) + " to sell.", ChatFormatting.RED);
-            return;
-        }
-        Util.give(p, ore.item, refund);
-        Util.msg(p, "Sold " + cnt + "x " + nice(e.item) + " for " + refund + " " + ore.label, ChatFormatting.GREEN);
     }
 
     // ================================================================ bids / my auctions
@@ -270,52 +241,153 @@ public final class Gui {
         m.set(22, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> bids(pl, true));
     }
 
-    // ================================================================ player market (fixed price, players list items)
+    // ================================================================ shop (player market) with filters + search
+    private static class View {
+        Ore ore = null;          // null = all ores
+        int sort = 0;            // 0 newest, 1 price low->high, 2 price high->low
+        String query = "";
+        int page = 0;
+    }
+
+    private static final Map<UUID, View> VIEWS = new HashMap<>();
+    private static final String[] SORT_NAMES = {"Newest first", "Price: low to high", "Price: high to low"};
+
+    private static View view(ServerPlayer p) { return VIEWS.computeIfAbsent(p.getUUID(), k -> new View()); }
+
+    public static void searchShop(ServerPlayer p, String text) {
+        View v = view(p);
+        v.query = text.toLowerCase().trim();
+        v.page = 0;
+        market(p);
+    }
+
+    private static long worth(Data.Listing l) { return (long) Ore.parse(l.ore).value * l.price; }
+
+    private static List<Data.Listing> filtered(View v) {
+        List<Data.Listing> list = new ArrayList<>();
+        for (Data.Listing l : Data.store.listings) {
+            if (Util.item(l.item) == Items.AIR) continue;
+            if (v.ore != null && !v.ore.name().equals(l.ore)) continue;
+            if (!v.query.isEmpty()) {
+                String hay = (nice(l.item) + " " + l.sellerName).toLowerCase();
+                if (!hay.contains(v.query)) continue;
+            }
+            list.add(l);
+        }
+        if (v.sort == 1) list.sort((a, b) -> Long.compare(worth(a), worth(b)));
+        else if (v.sort == 2) list.sort((a, b) -> Long.compare(worth(b), worth(a)));
+        else list.sort((a, b) -> Integer.compare(b.id, a.id));
+        return list;
+    }
+
     public static void market(ServerPlayer p) {
-        open(p, "Player Market", 6, m -> {
-            String me = p.getUUID().toString();
-            boolean owner = isOwner(p);
-            int slot = 0;
-            for (Data.Listing l : new ArrayList<>(Data.store.listings)) {
-                if (slot >= 45) break;
-                Item it = Util.item(l.item);
-                if (it == Items.AIR) continue;
-                Ore ore = Ore.parse(l.ore);
-                ItemStack s = new ItemStack(it, Math.max(1, l.count));
-                List<String> lore = new ArrayList<>();
-                lore.add("Seller: " + l.sellerName);
-                lore.add("Price: " + l.price + " " + ore.label);
-                if (me.equals(l.seller)) lore.add("Your listing - right-click to take it back");
-                else {
-                    lore.add("Left-click: buy");
-                    if (owner) lore.add("OWNER: right-click to remove");
+        String title = Data.layout.shopTitle + (Market.isTest(p) ? " [TEST MODE]" : "");
+        open(p, title, 6, m -> drawMarket(m, p, view(p)));
+    }
+
+    private static void drawMarket(GuiMenu m, ServerPlayer p, View v) {
+        String me = p.getUUID().toString();
+        boolean owner = isOwner(p);
+        boolean test = Market.isTest(p);
+        List<Data.Listing> list = filtered(v);
+        int pages = Math.max(1, (list.size() + 44) / 45);
+        if (v.page >= pages) v.page = pages - 1;
+        if (v.page < 0) v.page = 0;
+        int start = v.page * 45;
+
+        for (int i = 0; i < 45; i++) {
+            int idx = start + i;
+            if (idx >= list.size()) { m.clear(i); continue; }
+            Data.Listing l = list.get(idx);
+            boolean mine = me.equals(l.seller);
+            Item it = Util.item(l.item);
+            ItemStack s = new ItemStack(it, Math.max(1, l.count));
+            List<String> lore = new ArrayList<>();
+            lore.add("Seller: " + l.sellerName);
+            lore.add("Price: " + Market.priceText(l));
+            if (mine) {
+                lore.add("Your listing - right-click to take it back");
+                if (test) lore.add("TEST MODE: left-click to buy it yourself");
+            } else {
+                lore.add("Left-click: buy");
+            }
+            if (owner && !mine) lore.add("OWNER: right-click to REMOVE this listing");
+            s.set(DataComponents.LORE, Util.loreOf(lore));
+            m.set(i, s, (pl, t) -> {
+                if (m.lastButton == 1) {
+                    if (mine) Market.cancel(pl, l);
+                    else if (isOwner(pl)) Market.adminRemove(pl, l);
+                } else {
+                    Market.buy(pl, l);
                 }
-                s.set(DataComponents.LORE, Util.loreOf(lore));
-                m.set(slot++, s, (pl, t) -> {
-                    if (m.lastButton == 1) {
-                        if (pl.getUUID().toString().equals(l.seller)) Market.cancel(pl, l);
-                        else if (isOwner(pl)) Market.adminRemove(pl, l);
-                    } else {
-                        Market.buy(pl, l);
-                    }
+                drawMarket(m, pl, v);
+            });
+        }
+
+        // ----- bottom control row -----
+        m.set(45, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
+        m.set(46, Util.icon(Items.SPECTRAL_ARROW, 1, "Previous page", ChatFormatting.YELLOW,
+                List.of("Page " + (v.page + 1) + " / " + pages)), (pl, t) -> { v.page--; drawMarket(m, pl, v); });
+        m.set(47, Util.icon(v.ore == null ? Items.HOPPER : v.ore.item, 1,
+                "Filter: " + (v.ore == null ? "All ores" : v.ore.label + " only"), ChatFormatting.GOLD,
+                List.of("Left-click: next ore", "Right-click: previous ore")), (pl, t) -> {
+            int n = Ore.values().length + 1;
+            int cur = v.ore == null ? 0 : v.ore.ordinal() + 1;
+            cur = (cur + (m.lastButton == 1 ? n - 1 : 1)) % n;
+            v.ore = cur == 0 ? null : Ore.values()[cur - 1];
+            v.page = 0;
+            drawMarket(m, pl, v);
+        });
+        m.set(48, Util.icon(Items.COMPARATOR, 1, "Sort: " + SORT_NAMES[v.sort], ChatFormatting.AQUA,
+                List.of("Left-click: next", "Right-click: previous")), (pl, t) -> {
+            v.sort = (v.sort + (m.lastButton == 1 ? 2 : 1)) % 3;
+            v.page = 0;
+            drawMarket(m, pl, v);
+        });
+        m.set(49, Util.icon(Items.EMERALD_BLOCK, 1, "List an Item", ChatFormatting.GREEN,
+                List.of("Sell the item in your hand", "for a fixed price.")), (pl, t) -> listItem(pl));
+        m.set(50, Util.icon(Items.COMPASS, 1, "Search: " + (v.query.isEmpty() ? "(none)" : v.query), ChatFormatting.LIGHT_PURPLE,
+                List.of("Left-click: type a search in chat", "Right-click: clear search")), (pl, t) -> {
+            if (m.lastButton == 1) {
+                v.query = "";
+                v.page = 0;
+                drawMarket(m, pl, v);
+            } else {
+                Prompt.ask(pl, "Type the item (or seller) you want to find", txt -> {
+                    v.query = txt.toLowerCase();
+                    v.page = 0;
                     market(pl);
                 });
             }
-            m.set(45, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
-            m.set(49, Util.icon(Items.EMERALD_BLOCK, 1, "List an Item", ChatFormatting.GREEN,
-                    List.of("Sell the item in your hand", "for a fixed price.")), (pl, t) -> listItem(pl));
-            m.set(53, Util.icon(Items.CLOCK, 1, "Refresh", ChatFormatting.YELLOW, null), (pl, t) -> market(pl));
         });
+        m.set(51, Util.icon(Items.PAPER, 1, "Your ores", ChatFormatting.WHITE, balance(p)), null);
+        m.set(52, Util.icon(Items.SPECTRAL_ARROW, 1, "Next page", ChatFormatting.YELLOW,
+                List.of("Page " + (v.page + 1) + " / " + pages)), (pl, t) -> { v.page++; drawMarket(m, pl, v); });
+        m.set(53, Util.icon(Items.CLOCK, 1, "Refresh", ChatFormatting.YELLOW,
+                List.of(list.size() + " listing(s) shown")), (pl, t) -> drawMarket(m, pl, v));
     }
 
+    // ================================================================ list an item
     private static class ListDraft {
         Ore ore = Ore.IRON;
         int price = 1;
+        int extra = -1;          // index into Market.COMMON_BLOCKS, -1 = none
+        int extraCount = 16;
     }
 
     public static void listItem(ServerPlayer p) {
         ListDraft d = new ListDraft();
         open(p, "List an Item", 3, m -> drawList(m, p, d));
+    }
+
+    private static String draftText(ListDraft d) {
+        StringBuilder sb = new StringBuilder();
+        if (d.price > 0) sb.append(d.price).append(' ').append(d.ore.label);
+        if (d.extra >= 0) {
+            if (sb.length() > 0) sb.append(" + ");
+            sb.append(d.extraCount).append(' ').append(nice(Market.COMMON_BLOCKS[d.extra]));
+        }
+        return sb.length() == 0 ? "nothing yet" : sb.toString();
     }
 
     private static void drawList(GuiMenu m, ServerPlayer p, ListDraft d) {
@@ -328,155 +400,158 @@ public final class Gui {
             s.set(DataComponents.LORE, Util.loreOf(List.of("This is what gets listed.", "The whole stack is sold together.")));
             m.set(4, s, null);
         }
-        m.set(11, Util.icon(d.ore.item, 1, "Currency: " + d.ore.label, ChatFormatting.GOLD,
+        m.set(10, Util.icon(d.ore.item, 1, "Currency: " + d.ore.label, ChatFormatting.GOLD,
                 List.of("Left-click: next ore", "Right-click: previous ore")), (pl, t) -> {
             int n = Ore.values().length;
             d.ore = Ore.values()[(d.ore.ordinal() + (m.lastButton == 1 ? n - 1 : 1)) % n];
             drawList(m, pl, d);
         });
-        m.set(13, Util.icon(Items.GOLD_NUGGET, 1, "Price: " + d.price + " " + d.ore.label, ChatFormatting.YELLOW,
-                List.of("Left: +1   Right: -1", "Shift-left: +10   Shift-right: -10")), (pl, t) -> {
-            d.price = Math.max(1, Math.min(100000, d.price + delta(m, t, 1, 10)));
+        m.set(11, Util.icon(Items.GOLD_NUGGET, 1, "Ore price: " + d.price + " " + d.ore.label, ChatFormatting.YELLOW,
+                List.of("Left: +1   Right: -1", "Shift-left: +10   Shift-right: -10", "Can be 0 if you set a block price.")), (pl, t) -> {
+            d.price = Math.max(0, Math.min(100000, d.price + delta(m, t, 1, 10)));
             drawList(m, pl, d);
         });
-        m.set(15, Util.icon(Items.EMERALD_BLOCK, 1, "CONFIRM", ChatFormatting.GREEN,
-                List.of("Put it on the market!")), (pl, t) -> {
-            if (Market.create(pl, d.ore.name(), d.price)) market(pl);
+        Item extraItem = d.extra < 0 ? Items.BARRIER : Util.item(Market.COMMON_BLOCKS[d.extra]);
+        m.set(13, Util.icon(extraItem, 1,
+                "Extra block price: " + (d.extra < 0 ? "none (optional)" : nice(Market.COMMON_BLOCKS[d.extra])), ChatFormatting.GREEN,
+                List.of("Optional! Buyer also pays blocks.", "Left-click: next block", "Right-click: previous block")), (pl, t) -> {
+            int n = Market.COMMON_BLOCKS.length + 1;
+            int cur = d.extra + 1;
+            cur = (cur + (m.lastButton == 1 ? n - 1 : 1)) % n;
+            d.extra = cur - 1;
+            drawList(m, pl, d);
+        });
+        m.set(14, Util.icon(Items.CHEST, 1, "Block amount: " + d.extraCount, ChatFormatting.AQUA,
+                List.of("Left: +1   Right: -1", "Shift-left: +16   Shift-right: -16")), (pl, t) -> {
+            d.extraCount = Math.max(1, Math.min(2304, d.extraCount + delta(m, t, 1, 16)));
+            drawList(m, pl, d);
+        });
+        m.set(16, Util.icon(Items.EMERALD_BLOCK, 1, "CONFIRM", ChatFormatting.GREEN,
+                List.of("Price: " + draftText(d), "Click to put it in the shop!")), (pl, t) -> {
+            String extra = d.extra < 0 ? null : Market.COMMON_BLOCKS[d.extra];
+            if (Market.create(pl, d.ore.name(), d.price, extra, d.extraCount)) market(pl);
         });
         m.set(22, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> market(pl));
     }
 
-    // ================================================================ owner: edit shop from the GUI
-    public static void ownerEdit(ServerPlayer p) {
-        open(p, "Edit Shop (click an item)", 6, m -> drawOwner(m, p));
+    // ================================================================ owner menu (OP only)
+    public static void ownerMenu(ServerPlayer p) {
+        open(p, "Owner Menu", 3, m -> drawOwnerMenu(m, p));
     }
 
-    private static void drawOwner(GuiMenu m, ServerPlayer p) {
-        Map<Integer, Data.Entry> bySlot = new HashMap<>();
-        for (Data.Entry e : Data.layout.entries) bySlot.put(e.slot, e);
-        for (int i = 0; i < 45; i++) {
-            Data.Entry e = bySlot.get(i);
-            Item it = e == null ? Items.AIR : Util.item(e.item);
-            if (e == null || it == Items.AIR) { m.clear(i); continue; }
-            Ore ore = Ore.parse(e.ore);
-            ItemStack s = new ItemStack(it, Math.max(1, e.count));
-            s.set(DataComponents.LORE, Util.loreOf(List.of(
-                    "Price: " + e.price + " " + ore.label, "Click to edit / remove")));
-            m.set(i, s, (pl, t) -> editEntry(pl, e));
-        }
-        m.set(45, Util.icon(Items.EMERALD_BLOCK, 1, "Add item in your hand", ChatFormatting.GREEN,
-                List.of("Adds the item you hold to the shop.", "Then click it to set the price.")), (pl, t) -> {
-            addHeld(pl);
-            drawOwner(m, pl);
+    private static void drawOwnerMenu(GuiMenu m, ServerPlayer p) {
+        boolean test = Market.TEST.contains(p.getUUID());
+        m.set(4, Util.icon(Items.PAPER, 1, "Owner tools", ChatFormatting.RED,
+                List.of("Only OPs can open this.")), null);
+        m.set(10, Util.icon(test ? Items.LIME_DYE : Items.GRAY_DYE, 1, "Test mode: " + (test ? "ON" : "OFF"),
+                test ? ChatFormatting.GREEN : ChatFormatting.GRAY,
+                List.of("When ON you can buy your OWN listings", "in the shop. You pay yourself, so you",
+                        "lose nothing - perfect for testing.")), (pl, t) -> {
+            if (!Market.TEST.remove(pl.getUUID())) Market.TEST.add(pl.getUUID());
+            drawOwnerMenu(m, pl);
         });
-        m.set(47, Util.icon(Items.CHEST, 1, "Rearrange (drag mode)", ChatFormatting.AQUA,
-                List.of("Drag items around freely.")), (pl, t) -> editor(pl));
-        m.set(49, Util.icon(Items.TNT, 1, "Clear whole shop", ChatFormatting.RED,
-                List.of("SHIFT-click to remove EVERY item.")), (pl, t) -> {
-            if (t != ClickType.QUICK_MOVE) {
-                Util.msg(pl, "Shift-click to confirm: this removes every shop item.", ChatFormatting.YELLOW);
-                return;
+        m.set(12, Util.icon(Items.BARREL, 1, "Moderate shop", ChatFormatting.LIGHT_PURPLE,
+                List.of("Open the shop.", "Right-click any listing to REMOVE it.", "(the item goes back to the seller)")), (pl, t) -> market(pl));
+        m.set(14, Util.icon(Items.GOLD_INGOT, 1, "Moderate auctions", ChatFormatting.GOLD,
+                List.of("Open the auctions.", "Right-click any auction to REMOVE it.")), (pl, t) -> bids(pl, false));
+        m.set(16, Util.icon(Items.PAINTING, 1, "Customize GUI", ChatFormatting.AQUA,
+                List.of("Change titles, icons, names,", "background and border.")), (pl, t) -> customize(pl));
+        m.set(22, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
+    }
+
+    // ================================================================ owner: customize the whole GUI
+    public static void customize(ServerPlayer p) {
+        open(p, "Customize GUI", 6, m -> drawCustom(m, p));
+    }
+
+    private static void titleButton(GuiMenu m, int slot, String label, String current, Consumer<String> setter) {
+        m.set(slot, Util.icon(Items.OAK_SIGN, 1, label, ChatFormatting.YELLOW,
+                List.of("Now: " + current, "Click, then type the new title in chat.", "Use & for colors, e.g. &6Gold &bAqua")),
+                (pl, t) -> Prompt.ask(pl, "Type the new " + label + ":", txt -> {
+                    setter.accept(colorize(txt));
+                    Data.saveLayout();
+                    customize(pl);
+                }));
+    }
+
+    private static void buttonCustom(GuiMenu m, int slot, String key, Item defIcon, String defName) {
+        m.set(slot, Util.icon(iconFor(key, defIcon), 1, "Button: " + nameFor(key, defName), ChatFormatting.WHITE,
+                List.of("Left-click: use the item in your hand as icon",
+                        "Right-click: rename (type in chat)", "Shift-click: reset to default")), (pl, t) -> {
+            if (t == ClickType.QUICK_MOVE) {
+                Data.layout.icons.remove(key);
+                Data.layout.names.remove(key);
+                Data.saveLayout();
+                Util.msg(pl, "Button reset.", ChatFormatting.GREEN);
+                drawCustomAfter(m, pl);
+            } else if (m.lastButton == 1) {
+                Prompt.ask(pl, "Type the new name for this button (& for colors)", txt -> {
+                    Data.layout.names.put(key, colorize(txt));
+                    Data.saveLayout();
+                    customize(pl);
+                });
+            } else {
+                ItemStack h = pl.getMainHandItem();
+                if (h.isEmpty()) { Util.msg(pl, "Hold an item to use as the icon.", ChatFormatting.RED); return; }
+                Data.layout.icons.put(key, Util.id(h.getItem()));
+                Data.saveLayout();
+                Util.msg(pl, "Icon updated.", ChatFormatting.GREEN);
+                drawCustomAfter(m, pl);
             }
-            Data.layout.entries.clear();
-            Data.saveLayout();
-            Util.msg(pl, "Shop cleared.", ChatFormatting.GREEN);
-            drawOwner(m, pl);
         });
-        m.set(53, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> main(pl));
     }
 
-    private static void addHeld(ServerPlayer p) {
-        ItemStack h = p.getMainHandItem();
-        if (h.isEmpty()) { Util.msg(p, "Hold an item to add it.", ChatFormatting.RED); return; }
-        boolean[] used = new boolean[45];
-        for (Data.Entry e : Data.layout.entries) if (e.slot >= 0 && e.slot < 45) used[e.slot] = true;
-        int f = 0;
-        while (f < 45 && used[f]) f++;
-        if (f >= 45) { Util.msg(p, "The shop is full.", ChatFormatting.RED); return; }
-        Data.layout.entries.add(new Data.Entry(f, Util.id(h.getItem()), Math.max(1, h.getCount()), "IRON", 1));
-        Data.saveLayout();
-        Util.msg(p, "Added " + nice(Util.id(h.getItem())) + " - click it to set the price.", ChatFormatting.GREEN);
-    }
+    private static void drawCustomAfter(GuiMenu m, ServerPlayer p) { drawCustom(m, p); }
 
-    public static void editEntry(ServerPlayer p, Data.Entry e) {
-        open(p, "Edit item", 3, m -> drawEntry(m, p, e));
-    }
+    private static void drawCustom(GuiMenu m, ServerPlayer p) {
+        titleButton(m, 10, "MAIN MENU title", Data.layout.mainTitle, s -> Data.layout.mainTitle = s);
+        titleButton(m, 11, "SHOP title", Data.layout.shopTitle, s -> Data.layout.shopTitle = s);
+        titleButton(m, 12, "AUCTIONS title", Data.layout.bidsTitle, s -> Data.layout.bidsTitle = s);
 
-    private static void drawEntry(GuiMenu m, ServerPlayer p, Data.Entry e) {
-        Item it = Util.item(e.item);
-        Ore ore = Ore.parse(e.ore);
-        if (it == Items.AIR) m.set(4, Util.icon(Items.BARRIER, 1, "Unknown item", ChatFormatting.RED, null), null);
-        else m.set(4, new ItemStack(it, Math.max(1, e.count)), null);
+        buttonCustom(m, 19, "shop", Items.CHEST, "Shop");
+        buttonCustom(m, 20, "bids", Items.GOLD_INGOT, "Bids");
+        buttonCustom(m, 21, "mine", Items.WRITABLE_BOOK, "My Auctions");
 
-        m.set(10, Util.icon(ore.item, 1, "Price: " + e.price + " " + ore.label, ChatFormatting.GOLD,
-                List.of("Left: +1   Right: -1", "Shift-left: +10   Shift-right: -10")), (pl, t) -> {
-            e.price = Math.max(1, Math.min(100000, e.price + delta(m, t, 1, 10)));
-            Data.saveLayout();
-            drawEntry(m, pl, e);
-        });
-        m.set(12, Util.icon(Items.GOLD_INGOT, 1, "Currency: " + ore.label, ChatFormatting.YELLOW,
-                List.of("Left-click: next ore", "Right-click: previous ore")), (pl, t) -> {
-            int n = Ore.values().length;
-            Ore cur = Ore.parse(e.ore);
-            e.ore = Ore.values()[(cur.ordinal() + (m.lastButton == 1 ? n - 1 : 1)) % n].name();
-            Data.saveLayout();
-            drawEntry(m, pl, e);
-        });
-        m.set(14, Util.icon(Items.CHEST, 1, "Amount per purchase: " + e.count, ChatFormatting.AQUA,
-                List.of("Left: +1   Right: -1", "Shift-left: +8   Shift-right: -8")), (pl, t) -> {
-            e.count = Math.max(1, Math.min(64, e.count + delta(m, t, 1, 8)));
-            Data.saveLayout();
-            drawEntry(m, pl, e);
-        });
-        m.set(16, Util.icon(Items.TNT, 1, "REMOVE from shop", ChatFormatting.RED,
-                List.of("Click to delete this item.")), (pl, t) -> {
-            Data.layout.entries.remove(e);
-            Data.saveLayout();
-            Util.msg(pl, "Removed from the shop.", ChatFormatting.GREEN);
-            ownerEdit(pl);
-        });
-        m.set(22, Util.icon(Items.ARROW, 1, "Done", ChatFormatting.GREEN, null), (pl, t) -> ownerEdit(pl));
-    }
-
-    // ================================================================ owner: free drag editor
-    /** Plain editable chest: move items around = change the shop. Saved when closed. */
-    public static class EditorMenu extends ChestMenu {
-        private final SimpleContainer box;
-        EditorMenu(int id, Inventory inv, SimpleContainer box) {
-            super(MenuType.GENERIC_9x6, id, inv, box, 6);
-            this.box = box;
-        }
-        @Override
-        public void removed(Player player) {
-            super.removed(player);
-            Map<String, Data.Entry> old = new HashMap<>();
-            for (Data.Entry e : Data.layout.entries) old.putIfAbsent(e.item, e);
-            List<Data.Entry> list = new ArrayList<>();
-            for (int i = 0; i < 45; i++) {
-                ItemStack s = box.getItem(i);
-                if (s.isEmpty()) continue;
-                String id = Util.id(s.getItem());
-                Data.Entry prev = old.get(id);
-                list.add(new Data.Entry(i, id, s.getCount(),
-                        prev != null ? prev.ore : "IRON", prev != null ? prev.price : 1));
+        Item f = Util.item(Data.layout.filler);
+        if (f == Items.AIR) f = Items.GRAY_STAINED_GLASS_PANE;
+        m.set(28, Util.icon(f, 1, "Background item", ChatFormatting.WHITE,
+                List.of("Left-click: use the item in your hand", "Shift-click: reset")), (pl, t) -> {
+            if (t == ClickType.QUICK_MOVE) {
+                Data.layout.filler = "minecraft:gray_stained_glass_pane";
+            } else {
+                ItemStack h = pl.getMainHandItem();
+                if (h.isEmpty()) { Util.msg(pl, "Hold an item first.", ChatFormatting.RED); return; }
+                Data.layout.filler = Util.id(h.getItem());
             }
-            Data.layout.entries = list;
             Data.saveLayout();
-            if (player instanceof ServerPlayer sp) Util.msg(sp, "Shop layout saved.", ChatFormatting.GREEN);
-        }
-    }
+            drawCustom(m, pl);
+        });
 
-    public static void editor(ServerPlayer p) {
-        SimpleContainer box = new SimpleContainer(54);
-        for (Data.Entry e : Data.layout.entries) {
-            Item it = Util.item(e.item);
-            if (e.slot >= 0 && e.slot < 45 && it != Items.AIR) box.setItem(e.slot, new ItemStack(it, Math.max(1, e.count)));
-        }
-        for (int i = 45; i < 54; i++) {
-            box.setItem(i, Util.icon(Items.BARRIER, 1, "Reserved (ignored)", ChatFormatting.DARK_GRAY, null));
-        }
-        p.openMenu(new SimpleMenuProvider((id, inv, pl) -> new EditorMenu(id, inv, box),
-                Component.literal("Drag items (bottom row reserved)")));
-        Util.msg(p, "Drag items to rearrange. Close the chest to save. Use /owner shopedit again to set prices.", ChatFormatting.AQUA);
+        Item bd = Data.layout.border.isEmpty() ? Items.BARRIER : Util.item(Data.layout.border);
+        if (bd == Items.AIR) bd = Items.BARRIER;
+        m.set(29, Util.icon(bd, 1, "Border item", ChatFormatting.WHITE,
+                List.of("Outer ring of every menu.", "Left-click: use the item in your hand",
+                        "Shift-click: no special border")), (pl, t) -> {
+            if (t == ClickType.QUICK_MOVE) {
+                Data.layout.border = "";
+            } else {
+                ItemStack h = pl.getMainHandItem();
+                if (h.isEmpty()) { Util.msg(pl, "Hold an item first.", ChatFormatting.RED); return; }
+                Data.layout.border = Util.id(h.getItem());
+            }
+            Data.saveLayout();
+            drawCustom(m, pl);
+        });
+
+        boolean snd = Data.layout.clickSounds;
+        m.set(30, Util.icon(snd ? Items.NOTE_BLOCK : Items.BARRIER, 1, "Click sounds: " + (snd ? "ON" : "OFF"),
+                snd ? ChatFormatting.GREEN : ChatFormatting.RED, List.of("Click to toggle the ding.")), (pl, t) -> {
+            Data.layout.clickSounds = !Data.layout.clickSounds;
+            Data.saveLayout();
+            drawCustom(m, pl);
+        });
+
+        m.set(40, Util.icon(Items.ENDER_EYE, 1, "Preview main menu", ChatFormatting.LIGHT_PURPLE, null), (pl, t) -> main(pl));
+        m.set(49, Util.icon(Items.ARROW, 1, "Back", ChatFormatting.RED, null), (pl, t) -> ownerMenu(pl));
     }
 }
