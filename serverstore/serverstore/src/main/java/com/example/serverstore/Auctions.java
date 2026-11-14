@@ -16,7 +16,7 @@ public final class Auctions {
     public static MinecraftServer server;
     public static final int MAX_AUCTIONS = 45;
 
-    private static ServerPlayer online(String uuid) {
+    public static ServerPlayer online(String uuid) {
         return server == null ? null : server.getPlayerList().getPlayer(UUID.fromString(uuid));
     }
 
@@ -123,10 +123,14 @@ public final class Auctions {
 
     /** Give now if online, otherwise hold until they log in. */
     public static void deliver(String uuid, String itemId, int count) {
+        deliver(uuid, itemId, count, "the auction house");
+    }
+
+    public static void deliver(String uuid, String itemId, int count, String from) {
         ServerPlayer online = online(uuid);
         if (online != null) {
             Util.give(online, Util.item(itemId), count);
-            Util.msg(online, "You received " + count + "x " + nice(itemId) + " from the auction house.", ChatFormatting.GREEN);
+            Util.msg(online, "You received " + count + "x " + nice(itemId) + " from " + from + ".", ChatFormatting.GREEN);
         } else {
             Data.store.pending.computeIfAbsent(uuid, k -> new ArrayList<>()).add(new Data.Pending(itemId, count));
         }
