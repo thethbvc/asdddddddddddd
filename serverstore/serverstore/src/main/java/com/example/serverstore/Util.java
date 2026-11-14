@@ -5,6 +5,9 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
@@ -82,8 +85,20 @@ public final class Util {
         }
     }
 
+    public static void sound(ServerPlayer p, SoundEvent s, float vol, float pitch) {
+        p.playNotifySound(s, SoundSource.PLAYERS, vol, pitch);
+    }
+
+    /** Little "ding" for every button click. */
+    public static void click(ServerPlayer p) {
+        sound(p, SoundEvents.EXPERIENCE_ORB_PICKUP, 0.5f, 1.8f);
+    }
+
+    /** Green = success chime, red = "no" sound. */
     public static void msg(ServerPlayer p, String s, ChatFormatting color) {
         p.sendSystemMessage(Component.literal(s).withStyle(color));
+        if (color == ChatFormatting.GREEN) sound(p, SoundEvents.PLAYER_LEVELUP, 0.4f, 1.2f);
+        else if (color == ChatFormatting.RED) sound(p, SoundEvents.VILLAGER_NO, 0.6f, 1.0f);
     }
 
     public static String timeLeft(long endMillis) {
