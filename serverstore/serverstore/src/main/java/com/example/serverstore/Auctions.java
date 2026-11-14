@@ -16,14 +16,21 @@ public final class Auctions {
     public static MinecraftServer server;
     public static final int MAX_AUCTIONS = 45;
 
-    public static void create(ServerPlayer p, String oreName, int start, int minutes) {
+    private static ServerPlayer online(String uuid) {
+        return server == null ? null : server.getPlayerList().getPlayer(UUID.fromString(uuid));
+    }
+
+    private static String nice(String id) { return id.replace("minecraft:", "").replace('_', ' '); }
+
+    /** Returns true if the auction was created. */
+    public static boolean create(ServerPlayer p, String oreName, int start, int minutes) {
         ItemStack hand = p.getMainHandItem();
-        if (hand.isEmpty()) { Util.msg(p, "Hold the item you want to auction.", ChatFormatting.RED); return; }
+        if (hand.isEmpty()) { Util.msg(p, "Hold the item you want to auction.", ChatFormatting.RED); return false; }
         if (hand.isDamaged() || hand.isEnchanted()) {
             Util.msg(p, "Damaged or enchanted items are not supported (their data would be lost).", ChatFormatting.RED);
-            return;
+            return false;
         }
-        if (Data.store.auctions.size() >= MAX_AUCTIONS) { Util.msg(p, "The auction house is full.", ChatFormatting.RED); return; }
+        if (Data.store.auctions.size() >= MAX_AUCTIONS) { Util.msg(p, "The auction house is full.", ChatFormatting.RED); return false; }
         Ore ore = Ore.parse(oreName);
         Data.Auction a = new Data.Auction();
         a.id = Data.store.nextId++;
@@ -38,6 +45,15 @@ public final class Auctions {
         Data.store.auctions.add(a);
         Data.save();
         Util.msg(p, "Auction created! Starting bid: " + start + " " + ore.label, ChatFormatting.GREEN);
+        if (server != null) {
+            for (ServerPlayer o : server.getPlayerList().getPlayers()) {
+                if (o == p) continue;
+                Util.msg(o, "[Auction] " + a.sellerName + " listed " + a.count + "x " + nice(a.item)
+                        + " - starting bid " + start + " " + ore.label + "  (/shop > Bids)", ChatFormatting.GOLD);
+                Util.click(o);
+            }
+        }
+        return true;
     }
 
     public static void bid(ServerPlayer p, Data.Auction a, int inc) {
@@ -51,7 +67,15 @@ public final class Auctions {
             Util.msg(p, "You need " + amount + " " + ore.label + " to bid.", ChatFormatting.RED);
             return;
         }
-        if (a.bidder != null) deliver(a.bidder, Util.id(ore.item), a.bid);   // refund previous bidder
+        if (a.bidder != null) {
+            ServerPlayer prev = online(a.bidder);
+            if (prev != null) {
+                Util.msg(prev, "You were outbid on " + a.count + "x " + nice(a.item) + " by " + p.getName().getString()
+                        + " (" + amount + " " + ore.label + "). Your ores were refunded.", ChatFormatting.YELLOW);
+                Util.click(prev);
+            }
+            deliver(a.bidder, Util.id(ore.item), a.bid);   // refund previous bidder
+        }
         a.bid = amount;
         a.bidder = me;
         a.bidderName = p.getName().getString();
@@ -67,6 +91,15 @@ public final class Auctions {
         Util.give(p, Util.item(a.item), a.count);
         Data.save();
         Util.msg(p, "Auction cancelled, item returned.", ChatFormatting.YELLOW);
+    }
+
+    /** OP only: remove any auction. Item goes back to the seller, bidder is refunded. */
+    public static void adminRemove(ServerPlayer p, Data.Auction a) {
+        if (!Data.store.auctions.remove(a)) return;
+        deliver(a.seller, a.item, a.count);
+        if (a.bidder != null) deliver(a.bidder, Util.id(Ore.parse(a.ore).item), a.bid);
+        Data.save();
+        Util.msg(p, "Auction removed (item returned to the seller).", ChatFormatting.YELLOW);
     }
 
     public static void tick() {
@@ -90,10 +123,10 @@ public final class Auctions {
 
     /** Give now if online, otherwise hold until they log in. */
     public static void deliver(String uuid, String itemId, int count) {
-        ServerPlayer online = server == null ? null : server.getPlayerList().getPlayer(UUID.fromString(uuid));
+        ServerPlayer online = online(uuid);
         if (online != null) {
             Util.give(online, Util.item(itemId), count);
-            Util.msg(online, "You received " + count + "x " + itemId.replace("minecraft:", "") + " from the auction house.", ChatFormatting.GREEN);
+            Util.msg(online, "You received " + count + "x " + nice(itemId) + " from the auction house.", ChatFormatting.GREEN);
         } else {
             Data.store.pending.computeIfAbsent(uuid, k -> new ArrayList<>()).add(new Data.Pending(itemId, count));
         }
