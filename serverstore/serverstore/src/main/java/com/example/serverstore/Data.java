@@ -73,7 +73,8 @@ public final class Data {
             Path l = dir().resolve("layout.json");
             if (Files.exists(l)) layout = GSON.fromJson(Files.readString(l), Layout.class);
             if (layout == null) layout = new Layout();
-            if (layout.entries.isEmpty()) defaults();
+            if (layout.entries.isEmpty() && !Files.exists(l)) defaults();
+            normalize();
             Path s = dir().resolve("store.json");
             if (Files.exists(s)) store = GSON.fromJson(Files.readString(s), Store.class);
             if (store == null) store = new Store();
@@ -81,6 +82,22 @@ public final class Data {
             e.printStackTrace();
         }
         saveLayout();
+    }
+
+    /** Shop items live in slots 0-44; the bottom row is for buttons. */
+    private static void normalize() {
+        boolean[] used = new boolean[45];
+        List<Entry> bad = new ArrayList<>();
+        for (Entry e : layout.entries) {
+            if (e.slot >= 0 && e.slot < 45 && !used[e.slot]) used[e.slot] = true;
+            else bad.add(e);
+        }
+        for (Entry e : bad) {
+            int f = 0;
+            while (f < 45 && used[f]) f++;
+            if (f < 45) { e.slot = f; used[f] = true; }
+            else layout.entries.remove(e);
+        }
     }
 
     private static void defaults() {
