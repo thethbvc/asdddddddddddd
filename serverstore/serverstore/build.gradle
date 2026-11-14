@@ -14,7 +14,7 @@ repositories { mavenCentral() }
 
 neoForge {
     // CHECK https://projects.neoforged.net/neoforged/neoforge and use the newest 21.11.x version here
-    version = '21.11.0'
+    version = '21.11.42'
     runs { server { server() } }
     mods { serverstore { sourceSet sourceSets.main } }
 }
