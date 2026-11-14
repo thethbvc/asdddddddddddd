@@ -11,39 +11,28 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
-/** The shop: players list items at a fixed price. */
+/** The shop: players list items at a fixed ore price. */
 public final class Market {
     public static final int MAX_LISTINGS = 200;
 
     /** OPs in test mode may buy their own listings (they pay themselves, so nothing is lost). */
     public static final Set<UUID> TEST = new HashSet<>();
 
-    /** Common blocks that can be added as an optional extra price. */
-    public static final String[] COMMON_BLOCKS = {
-            "minecraft:dirt", "minecraft:cobblestone", "minecraft:stone", "minecraft:deepslate",
-            "minecraft:cobbled_deepslate", "minecraft:sand", "minecraft:gravel", "minecraft:oak_log",
-            "minecraft:spruce_log", "minecraft:birch_log", "minecraft:netherrack", "minecraft:end_stone",
-            "minecraft:obsidian", "minecraft:glass", "minecraft:sandstone", "minecraft:granite",
-            "minecraft:diorite", "minecraft:andesite", "minecraft:tuff", "minecraft:clay"
-    };
+    /** Retained as an empty array for compatibility with the current GUI; block prices are disabled. */
+    public static final String[] COMMON_BLOCKS = {};
 
     public static String nice(String id) { return id.replace("minecraft:", "").replace('_', ' '); }
 
+    /** Listings now have a single ore-currency price. */
     public static String priceText(Data.Listing l) {
-        StringBuilder sb = new StringBuilder();
-        if (l.price > 0) sb.append(l.price).append(' ').append(Ore.parse(l.ore).label);
-        if (l.extraItem != null && l.extraCount > 0) {
-            if (sb.length() > 0) sb.append(" + ");
-            sb.append(l.extraCount).append(' ').append(nice(l.extraItem));
-        }
-        return sb.length() == 0 ? "free" : sb.toString();
+        return l.price <= 0 ? "free" : l.price + " " + Ore.parse(l.ore).label;
     }
 
     public static boolean isTest(ServerPlayer p) {
         return TEST.contains(p.getUUID()) && ServerStore.isOp(p.createCommandSourceStack());
     }
 
-    /** Takes the item in the player's hand and lists it. */
+    /** Takes the item in the player's hand and lists it. Legacy extra-price arguments are ignored. */
     public static boolean create(ServerPlayer p, String oreName, int price, String extraItem, int extraCount) {
         ItemStack hand = p.getMainHandItem();
         if (hand.isEmpty()) { Util.msg(p, "Hold the item you want to sell.", ChatFormatting.RED); return false; }
@@ -52,9 +41,7 @@ public final class Market {
             return false;
         }
         if (Data.store.listings.size() >= MAX_LISTINGS) { Util.msg(p, "The shop is full.", ChatFormatting.RED); return false; }
-        Item extra = extraItem == null ? Items.AIR : Util.item(extraItem);
-        if (extra == Items.AIR) { extraItem = null; extraCount = 0; }
-        if (price <= 0 && extraItem == null) { Util.msg(p, "Set a price (ores and/or blocks).", ChatFormatting.RED); return false; }
+        if (price <= 0) { Util.msg(p, "Set an ore price greater than 0.", ChatFormatting.RED); return false; }
         Ore ore = Ore.parse(oreName);
         Data.Listing l = new Data.Listing();
         l.id = Data.store.nextId++;
@@ -63,9 +50,10 @@ public final class Market {
         l.item = Util.id(hand.getItem());
         l.count = hand.getCount();
         l.ore = ore.name();
-        l.price = Math.max(0, price);
-        l.extraItem = extraItem;
-        l.extraCount = extraCount;
+        l.price = price;
+        // Clear legacy fields so future saves no longer retain block-price data.
+        l.extraItem = null;
+        l.extraCount = 0;
         p.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
         Data.store.listings.add(l);
         Data.save();
@@ -81,15 +69,11 @@ public final class Market {
             return;
         }
         Ore ore = Ore.parse(l.ore);
-        Item extra = l.extraItem == null ? Items.AIR : Util.item(l.extraItem);
-        int ec = extra == Items.AIR ? 0 : l.extraCount;
-        boolean enough = Util.count(p, ore.item) >= l.price && (ec == 0 || Util.count(p, extra) >= ec);
-        if (!enough) {
+        if (l.price > 0 && Util.count(p, ore.item) < l.price) {
             Util.msg(p, "You need " + priceText(l) + ".", ChatFormatting.RED);
             return;
         }
         if (l.price > 0) Util.take(p, ore.item, l.price);
-        if (ec > 0) Util.take(p, extra, ec);
         Data.store.listings.remove(l);
         Util.give(p, Util.item(l.item), l.count);
         ServerPlayer seller = Auctions.online(l.seller);
@@ -98,7 +82,6 @@ public final class Market {
             Util.click(seller);
         }
         if (l.price > 0) Auctions.deliver(l.seller, Util.id(ore.item), l.price, "the shop");
-        if (ec > 0) Auctions.deliver(l.seller, l.extraItem, ec, "the shop");
         Data.save();
         Util.msg(p, "Bought " + l.count + "x " + nice(l.item) + " for " + priceText(l) + (test ? "  [TEST MODE]" : ""), ChatFormatting.GREEN);
     }

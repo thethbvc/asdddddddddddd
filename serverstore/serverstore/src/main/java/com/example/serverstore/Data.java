@@ -20,10 +20,10 @@ public final class Data {
         public String shopTitle = "Shop";
         public String bidsTitle = "Auctions";
         public String filler = "minecraft:gray_stained_glass_pane";
-        public String border = "";                       // empty = same as filler
+        public String border = "";
         public boolean clickSounds = true;
-        public Map<String, String> icons = new HashMap<>();   // button key -> item id
-        public Map<String, String> names = new HashMap<>();   // button key -> custom name
+        public Map<String, String> icons = new HashMap<>();
+        public Map<String, String> names = new HashMap<>();
     }
 
     public static class Auction {
@@ -33,20 +33,21 @@ public final class Data {
         public int count;
         public String ore;
         public int start;
-        public int bid;            // 0 = no bids yet
+        public int bid;
         public String bidder, bidderName;
         public long end;
     }
 
-    /** A fixed-price item that a player put up in the shop. Price = ores and/or an optional block price. */
+    /** A fixed-price item that a player put up in the shop. */
     public static class Listing {
         public int id;
         public String seller, sellerName;
         public String item;
         public int count;
         public String ore;
-        public int price;            // ore amount (can be 0 if a block price is set)
-        public String extraItem;     // optional block price, e.g. minecraft:cobblestone
+        public int price;
+        // Kept only to deserialize older store.json files; migrated and cleared on load.
+        public String extraItem;
         public int extraCount;
     }
 
@@ -75,6 +76,7 @@ public final class Data {
     }
 
     public static void load() {
+        boolean migratedListings = false;
         try {
             Path l = dir().resolve("layout.json");
             if (Files.exists(l)) layout = GSON.fromJson(Files.readString(l), Layout.class);
@@ -86,10 +88,22 @@ public final class Data {
             if (Files.exists(s)) store = GSON.fromJson(Files.readString(s), Store.class);
             if (store == null) store = new Store();
             if (store.listings == null) store.listings = new ArrayList<>();
+            for (Listing listing : store.listings) {
+                // Old block-only listings had no ore price; give them a minimum ore price rather
+                // than unexpectedly turning them into free listings when block prices are removed.
+                if (listing.price <= 0 && listing.extraItem != null) {
+                    listing.price = 1;
+                    migratedListings = true;
+                }
+                if (listing.extraItem != null || listing.extraCount != 0) migratedListings = true;
+                listing.extraItem = null;
+                listing.extraCount = 0;
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
         saveLayout();
+        if (migratedListings) save();
     }
 
     public static void saveLayout() {
