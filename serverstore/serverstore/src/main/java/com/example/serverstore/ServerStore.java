@@ -102,7 +102,7 @@ public class ServerStore {
                                                     : "Price set to " + amt + " " + ore.label + " (" + n + " entries).",
                                                     n == 0 ? ChatFormatting.RED : ChatFormatting.GREEN);
                                             return 1;
-                                        })))))
+                                        }))))
                 .then(Commands.literal("title")
                         .then(Commands.argument("which", StringArgumentType.word())
                                 .suggests((c, b) -> SharedSuggestionProvider.suggest(new String[]{"main", "shop", "bids"}, b))
