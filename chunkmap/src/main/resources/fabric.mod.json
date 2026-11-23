@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "chunkmap",
+  "version": "${version}",
+  "name": "Chunk Map",
+  "description": "Client-side map of every chunk your game has loaded, saved per server and dimension.",
+  "authors": [],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.example.chunkmap.ChunkMapClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.1",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
