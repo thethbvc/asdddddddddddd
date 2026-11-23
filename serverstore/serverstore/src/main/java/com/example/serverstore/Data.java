@@ -31,6 +31,7 @@ public final class Data {
         public String seller, sellerName;
         public String item;
         public int count;
+        public String stack;      // full item data (enchants, name, durability...), null = plain item
         public String ore;
         public int start;
         public int bid;
@@ -44,9 +45,10 @@ public final class Data {
         public String seller, sellerName;
         public String item;
         public int count;
+        public String stack;      // full item data (enchants, name, durability...), null = plain item
         public String ore;
         public int price;
-        // Kept only to deserialize older store.json files; migrated and cleared on load.
+        // Optional extra price: the buyer also pays this many of this item (registry id, null = none).
         public String extraItem;
         public int extraCount;
     }
@@ -54,8 +56,10 @@ public final class Data {
     public static class Pending {
         public String item;
         public int count;
+        public String stack;      // full item data (enchants, name, durability...), null = plain item
         public Pending() {}
         public Pending(String item, int count) { this.item = item; this.count = count; }
+        public Pending(String item, int count, String stack) { this(item, count); this.stack = stack; }
     }
 
     public static class Store {
@@ -76,7 +80,6 @@ public final class Data {
     }
 
     public static void load() {
-        boolean migratedListings = false;
         try {
             Path l = dir().resolve("layout.json");
             if (Files.exists(l)) layout = GSON.fromJson(Files.readString(l), Layout.class);
@@ -88,22 +91,15 @@ public final class Data {
             if (Files.exists(s)) store = GSON.fromJson(Files.readString(s), Store.class);
             if (store == null) store = new Store();
             if (store.listings == null) store.listings = new ArrayList<>();
+            if (store.auctions == null) store.auctions = new ArrayList<>();
+            if (store.pending == null) store.pending = new HashMap<>();
             for (Listing listing : store.listings) {
-                // Old block-only listings had no ore price; give them a minimum ore price rather
-                // than unexpectedly turning them into free listings when block prices are removed.
-                if (listing.price <= 0 && listing.extraItem != null) {
-                    listing.price = 1;
-                    migratedListings = true;
-                }
-                if (listing.extraItem != null || listing.extraCount != 0) migratedListings = true;
-                listing.extraItem = null;
-                listing.extraCount = 0;
+                if (listing.extraItem != null && listing.extraCount <= 0) listing.extraItem = null;
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
         saveLayout();
-        if (migratedListings) save();
     }
 
     public static void saveLayout() {
