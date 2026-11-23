@@ -74,6 +74,73 @@ public final class Util {
         return true;
     }
 
+    /**
+     * Counts only plain, unmodified stacks of an item (no enchants, custom names, container contents...).
+     * Used for the extra-item price so a buyer can never lose a filled shulker box or an enchanted tool.
+     */
+    public static int countPlain(Player p, Item item) {
+        ItemStack plain = new ItemStack(item);
+        int c = 0;
+        Inventory inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack s = inv.getItem(i);
+            if (ItemStack.isSameItemSameComponents(s, plain)) c += s.getCount();
+        }
+        return c;
+    }
+
+    public static boolean takePlain(Player p, Item item, int amount) {
+        if (countPlain(p, item) < amount) return false;
+        ItemStack plain = new ItemStack(item);
+        Inventory inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize() && amount > 0; i++) {
+            ItemStack s = inv.getItem(i);
+            if (ItemStack.isSameItemSameComponents(s, plain)) {
+                int t = Math.min(amount, s.getCount());
+                s.shrink(t);
+                amount -= t;
+                if (s.isEmpty()) inv.setItem(i, ItemStack.EMPTY);
+            }
+        }
+        return true;
+    }
+
+    /** How many of an item still fit in the 36 main inventory slots (hotbar + storage). */
+    public static int roomFor(Player p, Item item) { return roomFor(p, new ItemStack(item)); }
+
+    /** Same, for a specific stack (its enchants/name/etc. decide what it can merge with). */
+    public static int roomFor(Player p, ItemStack proto) {
+        int max = Math.max(1, proto.getMaxStackSize());
+        Inventory inv = p.getInventory();
+        int room = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.isEmpty()) room += max;
+            else if (ItemStack.isSameItemSameComponents(s, proto)) room += Math.max(0, max - s.getCount());
+        }
+        return room;
+    }
+
+    /** Gives as much as fits in the inventory (never drops anything). Returns how many items did NOT fit. */
+    public static int giveFit(ServerPlayer p, Item item, int count) { return giveFit(p, new ItemStack(item), count); }
+
+    public static int giveFit(ServerPlayer p, ItemStack proto, int count) {
+        if (proto.isEmpty() || count <= 0) return 0;
+        int fit = Math.min(count, roomFor(p, proto));
+        int left = count - fit;
+        int max = Math.max(1, proto.getMaxStackSize());
+        int todo = fit;
+        while (todo > 0) {
+            int n = Math.min(max, todo);
+            ItemStack s = proto.copy();
+            s.setCount(n);
+            p.getInventory().add(s);
+            left += s.getCount();          // anything that unexpectedly did not fit stays owed
+            todo -= n;
+        }
+        return left;
+    }
+
     public static void give(ServerPlayer p, Item item, int count) {
         if (item == Items.AIR) return;
         int max = Math.max(1, new ItemStack(item).getMaxStackSize());
